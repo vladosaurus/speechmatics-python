@@ -11,6 +11,8 @@ import logging
 import sys
 import traceback
 
+from time import time
+
 import websockets
 
 from speechmatics.exceptions import EndOfTranscriptException, \
@@ -61,6 +63,8 @@ class WebsocketClient:
         # Semaphore used to ensure that we don't send too much audio data to
         # the server too quickly and burst any buffers downstream.
         self._buffer_semaphore = asyncio.BoundedSemaphore
+
+        self.start_time = None
 
     async def _init_synchronization_primitives(self):
         """
@@ -157,6 +161,7 @@ class WebsocketClient:
             handler(copy.deepcopy(message))
 
         if message_type == ServerMessageType.RecognitionStarted:
+            print(f'Recognition start time: {time() - self.start_time}')
             self._flag_recognition_started()
         elif message_type == ServerMessageType.AudioAdded:
             self._buffer_semaphore.release()
@@ -339,10 +344,14 @@ class WebsocketClient:
                 "--ssl-mode=none"
             )
             sys.exit(1)
+        except ConnectionRefusedError as e:
+            print(e.strerror)
+            sys.exit(1)
 
         self.websocket = websocket
         start_recognition_msg = self._start_recognition(audio_settings)
         await self.websocket.send(start_recognition_msg)
+        self.start_time = time()
         consumer_task = asyncio.create_task(self._consumer_handler())
         producer_task = asyncio.create_task(
             self._producer_handler(stream, audio_settings.chunk_size)
